@@ -1,0 +1,8 @@
+/target
+/NetPaste.app
+**/*.rs.bk
+.DS_Store
+
+# icon build intermediates; branding/icons/ is committed on purpose because
+# the Windows build embeds the .ico
+/branding/preview.html

@@ -1,0 +1,35 @@
+[package]
+name = "netpaste-app"
+version = "1.2.0"
+edition = "2021"
+description = "NetPaste - share text and files between your own machines on a local network"
+
+[[bin]]
+name = "NetPaste"
+path = "src/main.rs"
+
+[dependencies]
+# OpenGL backend: widest hardware support on Windows 10 and Intel iMacs.
+eframe = { version = "0.29", default-features = false, features = ["glow", "default_fonts", "persistence", "wayland", "x11"] }
+rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chacha20poly1305 = "0.10"
+sha2 = "0.10"
+getrandom = "0.2"
+socket2 = { version = "0.5", features = ["all"] }
+
+[profile.release]
+opt-level = 2
+lto = true
+strip = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = ["Win32_Globalization", "Win32_System_Com", "Win32_Foundation"] }
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = "0.1"

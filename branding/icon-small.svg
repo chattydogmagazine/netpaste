@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Simplified mark for 16-64px, where the link nodes of the full icon
+       collapse into noise. Same colours, fewer parts, bigger shapes. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#4C8DF6"/>
+      <stop offset="55%" stop-color="#2F6BD8"/>
+      <stop offset="100%" stop-color="#1E9E8A"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229" fill="url(#tile)"/>
+
+  <!-- back sheet -->
+  <rect x="180" y="206" width="372" height="470" rx="60" ry="60"
+        fill="#ffffff" fill-opacity="0.55"/>
+
+  <!-- front sheet -->
+  <rect x="404" y="320" width="440" height="540" rx="68" ry="68" fill="#ffffff"/>
+  <g fill="#2F6BD8">
+    <rect x="490" y="452" width="268" height="54" rx="27"/>
+    <rect x="490" y="560" width="268" height="54" rx="27"/>
+    <rect x="490" y="668" width="168" height="54" rx="27"/>
+  </g>
+</svg>
