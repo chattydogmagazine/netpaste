@@ -7,7 +7,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex, RwLock};
@@ -99,7 +99,16 @@ pub struct Net {
     /// Builds that were already tried and rejected. Without this, a bad
     /// build would be downloaded again every time we look.
     rejected: Mutex<std::collections::HashSet<String>>,
+    /// Devices on other networks, addressed directly because multicast and
+    /// broadcast do not travel beyond the local one.
+    remote_peers: Mutex<Vec<String>>,
+    /// Resolved addresses for those, so a hostname is not looked up every
+    /// couple of seconds. Cleared when the list changes.
+    resolved: Mutex<HashMap<String, (Option<SocketAddr>, u64)>>,
 }
+
+/// How long a resolved hostname is trusted before being looked up again.
+const RESOLVE_TTL: u64 = 30;
 
 pub fn platform_label() -> String {
     let os = match std::env::consts::OS {
@@ -173,6 +182,8 @@ impl Net {
             exe_sha: crate::update::self_exe_sha(),
             updating: Mutex::new(false),
             rejected: Mutex::new(std::collections::HashSet::new()),
+            remote_peers: Mutex::new(Vec::new()),
+            resolved: Mutex::new(HashMap::new()),
         });
 
         {
@@ -215,27 +226,96 @@ impl Net {
 
     // ---------------------------------------------------------- discovery
 
+    fn announcement(&self) -> Announce {
+        Announce {
+            id: self.device_id.clone(),
+            name: self.name(),
+            platform: platform_label(),
+            port: self.tcp_port,
+            ts: now_secs(),
+            version: crate::update::VERSION.to_string(),
+            exe_sha: self.exe_sha.clone(),
+            platform_key: crate::update::platform_key(),
+        }
+    }
+
     fn announce_loop(self: Arc<Self>) {
         loop {
-            let ann = Announce {
-                id: self.device_id.clone(),
-                name: self.name(),
-                platform: platform_label(),
-                port: self.tcp_port,
-                ts: now_secs(),
-                version: crate::update::VERSION.to_string(),
-                exe_sha: self.exe_sha.clone(),
-                platform_key: crate::update::platform_key(),
-            };
+            let ann = self.announcement();
             if let Ok(json) = serde_json::to_vec(&ann) {
                 let sealed = crate::crypto::seal(&self.key(), &json);
                 for ip in [MCAST_GROUP, Ipv4Addr::BROADCAST, Ipv4Addr::LOCALHOST] {
                     let _ = self.udp.send_to(&sealed, SocketAddr::from((ip, self.disc_port)));
                 }
+                // Devices on other networks never see the above, so they are
+                // told directly.
+                for addr in self.resolved_remote_peers() {
+                    let _ = self.udp.send_to(&sealed, addr);
+                }
             }
             self.prune_peers();
             thread::sleep(ANNOUNCE_EVERY);
         }
+    }
+
+    /// Replace the list of devices on other networks. Passing an empty list
+    /// switches the behaviour off entirely - nothing is sent off-LAN.
+    pub fn set_remote_peers(&self, peers: Vec<String>) {
+        let mut current = self.remote_peers.lock().unwrap();
+        if *current == peers {
+            return;
+        }
+        *current = peers;
+        self.resolved.lock().unwrap().clear();
+    }
+
+    /// Current addresses for the configured peers, looking up hostnames at
+    /// most every `RESOLVE_TTL` seconds so a MagicDNS name that moves is
+    /// picked up without a lookup on every announcement.
+    fn resolved_remote_peers(&self) -> Vec<SocketAddr> {
+        let peers = self.remote_peers.lock().unwrap().clone();
+        if peers.is_empty() {
+            return Vec::new();
+        }
+        let now = now_secs();
+        let mut cache = self.resolved.lock().unwrap();
+        cache.retain(|k, _| peers.contains(k));
+
+        let mut out = Vec::new();
+        for peer in peers {
+            let fresh = cache
+                .get(&peer)
+                .filter(|(_, at)| now.saturating_sub(*at) < RESOLVE_TTL)
+                .map(|(addr, _)| *addr);
+            let addr = match fresh {
+                Some(addr) => addr,
+                None => {
+                    let addr = resolve_peer(&peer, self.disc_port);
+                    cache.insert(peer.clone(), (addr, now));
+                    addr
+                }
+            };
+            if let Some(addr) = addr {
+                out.push(addr);
+            }
+        }
+        out
+    }
+
+    /// What the settings screen shows beside each configured address.
+    pub fn remote_peer_status(&self) -> Vec<(String, Option<SocketAddr>, bool)> {
+        let live: Vec<IpAddr> =
+            self.peers.lock().unwrap().values().map(|p| p.addr.ip()).collect();
+        let peers = self.remote_peers.lock().unwrap().clone();
+        let cache = self.resolved.lock().unwrap();
+        peers
+            .into_iter()
+            .map(|p| {
+                let addr = cache.get(&p).and_then(|(a, _)| *a);
+                let connected = addr.map(|a| live.contains(&a.ip())).unwrap_or(false);
+                (p, addr, connected)
+            })
+            .collect()
     }
 
     fn discovery_loop(self: Arc<Self>) {
@@ -254,6 +334,7 @@ impl Net {
             }
             let addr = SocketAddr::new(from.ip(), ann.port);
             let mut peers = self.peers.lock().unwrap();
+            let known = peers.contains_key(&ann.id);
             let (changed, unreachable) = match peers.get(&ann.id) {
                 Some(p) => (
                     p.name != ann.name || p.addr != addr || p.version != ann.version,
@@ -278,7 +359,21 @@ impl Net {
                     unreachable,
                 },
             );
+            let first_sighting = !known;
             drop(peers);
+
+            // Answer a device we had not heard from before, straight back to
+            // where it came from. That is what lets one side be configured
+            // with the other's address and both end up seeing each other -
+            // the reply reaches networks our multicast never will. The
+            // already-known check keeps it to one exchange, not a loop.
+            if first_sighting {
+                if let Ok(json) = serde_json::to_vec(&self.announcement()) {
+                    let sealed = crate::crypto::seal(&self.key(), &json);
+                    let _ = self.udp.send_to(&sealed, from);
+                }
+            }
+
             if changed {
                 self.publish_peers();
                 if let Some((from_name, version)) = offer {
@@ -639,6 +734,23 @@ fn pull_with(
     }
     std::fs::rename(&part, dest)?;
     Ok(())
+}
+
+/// Turn what someone typed into an address to announce to. Accepts a bare
+/// host or IP, or `host:port` when the other device's discovery port was
+/// changed from the default.
+fn resolve_peer(peer: &str, default_port: u16) -> Option<SocketAddr> {
+    let peer = peer.trim();
+    if peer.is_empty() {
+        return None;
+    }
+    // A bare IPv6 address has colons of its own, so only treat the tail as a
+    // port when what follows the last colon is actually a number.
+    let with_port = match peer.rsplit_once(':') {
+        Some((_, tail)) if tail.parse::<u16>().is_ok() => peer.to_string(),
+        _ => format!("{}:{}", peer, default_port),
+    };
+    with_port.to_socket_addrs().ok()?.find(|a| a.is_ipv4())
 }
 
 /// Best guess at this machine's LAN address, for the status line.

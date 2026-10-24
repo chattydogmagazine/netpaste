@@ -26,6 +26,14 @@ pub struct Config {
     /// Background colour for the high-contrast skin.
     #[serde(default = "default_background")]
     pub background: [u8; 3],
+    /// Reach devices that are not on this network - over a VPN such as
+    /// Tailscale, or a different subnet. Off unless asked for, because it
+    /// sends this device's name and presence to an address beyond the LAN.
+    #[serde(default)]
+    pub remote_peers_enabled: bool,
+    /// Addresses or hostnames of those devices, as typed.
+    #[serde(default)]
+    pub remote_peers: Vec<String>,
 }
 
 fn default_background() -> [u8; 3] {
@@ -60,6 +68,8 @@ impl Default for Config {
             auto_update: default_true(),
             theme: crate::theme::Theme::default(),
             background: default_background(),
+            remote_peers_enabled: false,
+            remote_peers: Vec::new(),
         }
     }
 }

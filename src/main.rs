@@ -140,6 +140,7 @@ struct App {
     settings_open: bool,
     draft_name: String,
     draft_key: String,
+    draft_peer: String,
     send_shortcut: bool,
 
     /// A newer version seen on another device: who has it and which version.
@@ -182,6 +183,7 @@ impl App {
             pending: Vec::new(),
             note: None,
             settings_open: first_run,
+            draft_peer: String::new(),
             send_shortcut: false,
             update_offer: None,
             update_progress: None,
@@ -200,6 +202,19 @@ impl App {
         app
     }
 
+    /// The network layer only knows about remote peers when the feature is
+    /// on; turning it off hands it an empty list, so nothing is sent off-LAN.
+    fn push_remote_peers(&self) {
+        if let Some(net) = &self.net {
+            let peers = if self.cfg.remote_peers_enabled {
+                self.cfg.remote_peers.clone()
+            } else {
+                Vec::new()
+            };
+            net.set_remote_peers(peers);
+        }
+    }
+
     fn start_net(&mut self, ctx: &egui::Context) {
         let ctx = ctx.clone();
         match Net::start(
@@ -214,6 +229,7 @@ impl App {
                 self.net = Some(net);
                 self.rx = Some(rx);
                 self.start_error = None;
+                self.push_remote_peers();
             }
             Err(e) => {
                 self.start_error = Some(format!(
@@ -1129,6 +1145,88 @@ impl App {
                     .small()
                     .color(dim_c),
                 );
+            }
+
+            ui.add_space(14.0);
+            ui.strong("Devices on other networks");
+            let dim_c = dim(ui);
+            ui.label(
+                egui::RichText::new(
+                    "NetPaste normally finds devices by calling out across the local \
+                     network, which nothing beyond it can hear. Name a device here and \
+                     it is told directly instead - over Tailscale or another VPN, or \
+                     across subnets. Only one of the two devices needs the other's \
+                     address; they introduce themselves to each other.",
+                )
+                .small()
+                .color(dim_c),
+            );
+            if ui
+                .checkbox(&mut self.cfg.remote_peers_enabled, "Reach devices beyond this network")
+                .changed()
+            {
+                self.cfg.save();
+                self.push_remote_peers();
+            }
+            if self.cfg.remote_peers_enabled {
+                let status = self
+                    .net
+                    .as_ref()
+                    .map(|n| n.remote_peer_status())
+                    .unwrap_or_default();
+                let mut remove = None;
+                for (i, (peer, addr, connected)) in status.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        status_dot(
+                            ui,
+                            if *connected {
+                                ONLINE
+                            } else if addr.is_some() {
+                                QUIET
+                            } else {
+                                UNREACHABLE
+                            },
+                        );
+                        ui.label(peer.as_str());
+                        let dim_c = dim(ui);
+                        let note = match (addr, connected) {
+                            (_, true) => "connected".to_string(),
+                            (Some(a), false) => format!("{} · no answer yet", a.ip()),
+                            (None, _) => "cannot look up that name".to_string(),
+                        };
+                        ui.label(egui::RichText::new(note).small().color(dim_c));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Remove").clicked() {
+                                remove = Some(i);
+                            }
+                        });
+                    });
+                }
+                if let Some(i) = remove {
+                    self.cfg.remote_peers.remove(i);
+                    self.cfg.save();
+                    self.push_remote_peers();
+                }
+                ui.horizontal(|ui| {
+                    let hint = ui.add(
+                        egui::TextEdit::singleline(&mut self.draft_peer)
+                            .desired_width(ui.available_width() - 90.0)
+                            .hint_text("tailscale name, hostname or IP address"),
+                    );
+                    let entered =
+                        hint.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if (ui.button("Add").clicked() || entered)
+                        && !self.draft_peer.trim().is_empty()
+                    {
+                        let peer = self.draft_peer.trim().to_string();
+                        if !self.cfg.remote_peers.contains(&peer) {
+                            self.cfg.remote_peers.push(peer);
+                            self.cfg.save();
+                            self.push_remote_peers();
+                        }
+                        self.draft_peer.clear();
+                    }
+                });
             }
 
             ui.add_space(12.0);

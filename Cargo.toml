@@ -1,6 +1,6 @@
 [package]
 name = "netpaste-app"
-version = "1.2.0"
+version = "1.3.0"
 edition = "2021"
 description = "NetPaste - share text and files between your own machines on a local network"
 

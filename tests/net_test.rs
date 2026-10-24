@@ -135,3 +135,76 @@ fn sealed_payloads_do_not_open_with_the_wrong_key() {
     // ciphertext is not the plaintext
     assert!(!sealed.windows(5).any(|w| w == b"hello"));
 }
+
+#[test]
+fn a_device_on_another_network_is_reached_by_address() {
+    // Different discovery ports stand in for "no shared broadcast domain":
+    // neither node can possibly hear the other's multicast or broadcast, the
+    // way two machines on opposite ends of a VPN cannot.
+    let key = "test-room-remote";
+    let (a, rx_a) = start("Here", key, 47501, 47500);
+    let (b, rx_b) = start("Far away", key, 47511, 47510);
+
+    // Nothing should be found on its own.
+    assert!(
+        wait_for(&rx_a, 4, |ev| match ev {
+            Event::Peers(list) if !list.is_empty() => Some(list.clone()),
+            _ => None,
+        })
+        .is_none(),
+        "the two nodes should not find each other without help"
+    );
+
+    // Only ONE side is told about the other, as in the settings screen.
+    a.set_remote_peers(vec!["127.0.0.1:47510".to_string()]);
+
+    let a_sees_b = wait_for(&rx_a, 12, |ev| match ev {
+        Event::Peers(list) => list.iter().find(|p| p.name == "Far away").map(|p| p.addr),
+        _ => None,
+    });
+    assert!(a_sees_b.is_some(), "the configured side never saw the other");
+
+    // ...and the other side learns about us from the introduction, despite
+    // having been given no address at all.
+    let b_sees_a = wait_for(&rx_b, 12, |ev| match ev {
+        Event::Peers(list) => list.iter().find(|p| p.name == "Here").map(|p| p.addr),
+        _ => None,
+    });
+    assert!(b_sees_a.is_some(), "the unconfigured side was never introduced");
+
+    // And the link actually carries a message.
+    b.post(crypto::random_hex(8), "hello across the tunnel".into(), vec![]);
+    let got = wait_for(&rx_a, 10, |ev| match ev {
+        Event::Incoming(i) => Some(i.body.clone()),
+        _ => None,
+    });
+    assert_eq!(got.as_deref(), Some("hello across the tunnel"));
+}
+
+#[test]
+fn turning_the_feature_off_stops_the_traffic() {
+    let key = "test-room-remote-off";
+    let (a, _rx_a) = start("Here", key, 47521, 47520);
+    let (_b, rx_b) = start("Far away", key, 47531, 47530);
+
+    a.set_remote_peers(vec!["127.0.0.1:47530".to_string()]);
+    assert!(
+        wait_for(&rx_b, 12, |ev| match ev {
+            Event::Peers(list) if !list.is_empty() => Some(()),
+            _ => None,
+        })
+        .is_some(),
+        "should be reachable while switched on"
+    );
+
+    // An empty list is what the app passes when the toggle goes off.
+    a.set_remote_peers(vec![]);
+    // Wait out the peer timeout, then confirm it stays gone.
+    std::thread::sleep(Duration::from_secs(netpaste_app::net::PEER_TIMEOUT + 3));
+    let _ = rx_b.try_iter().count();
+    let still_there = wait_for(&rx_b, 6, |ev| match ev {
+        Event::Peers(list) if !list.is_empty() => Some(()),
+        _ => None,
+    });
+    assert!(still_there.is_none(), "nothing should be sent once the feature is off");
+}
