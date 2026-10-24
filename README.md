@@ -45,6 +45,14 @@ other.
   mistyped and should not be emailed.
 - **Handing a file across without ceremony.** A PDF, a photo, a log. The
   recipient chooses where to save it, or ignores it.
+- **Borrowing one machine's input from another.** Dictation is the clearest
+  case: your phone or your Mac has a microphone and a dictation engine that
+  works well, and the machine you are actually working on does not — no mic, a
+  bad one, a locked-down build, or an OS whose dictation you do not get on
+  with. Speak into the good machine, send, and carry on typing-free on the
+  other one. The same goes for any input that lives on the wrong device: a
+  scanner's OCR output, a password manager that is only set up in one place, a
+  barcode app, handwriting recognition on a tablet.
 - **Machines with no internet.** An air-gapped or isolated LAN works exactly the
   same, because the internet was never involved.
 - **People who find most interfaces too small or too low-contrast.** There is a
@@ -96,6 +104,18 @@ builds for both kinds of Mac and merges them into one bundle, so the same app
 runs natively on an old Intel iMac and an M-series machine — and so they can
 update each other later.
 
+> **NetPaste is not code-signed or notarised**, so if you ever get a copy you
+> did not build yourself, macOS will refuse it with *"NetPaste cannot be opened
+> because the developer cannot be verified."* Right-click the app → **Open** →
+> **Open**, or clear the quarantine flag with
+> `xattr -dr com.apple.quarantine /Applications/NetPaste.app`. An app you built
+> on your own machine is not quarantined and opens normally.
+>
+> Signing would need a paid Apple Developer account, and this is a small
+> noncommercial tool. Building it yourself from source — which takes one
+> command — is both the recommended route and the one where you can see exactly
+> what you are running.
+
 > macOS will ask **"NetPaste would like to find and connect to devices on your
 > local network."** You must allow it, or the device list stays empty while
 > everything else looks like it is working. If you miss the prompt, tick
@@ -112,6 +132,12 @@ cargo build --release
 The app is `target\release\NetPaste.exe` — one file, no installer, no console
 window behind it. Copy it wherever you like; a sensible home is
 `%LOCALAPPDATA%\Programs\NetPaste\`.
+
+> **The .exe is not code-signed**, so a copy you did not build yourself will
+> trip Microsoft Defender SmartScreen: *"Windows protected your PC."* Click
+> **More info → Run anyway**. A code-signing certificate costs real money per
+> year, which a noncommercial tool does not justify — so building from source
+> is the recommended route, and you can read every line of what you run.
 
 <details>
 <summary><strong>Building on Windows without Visual Studio</strong> (click)</summary>
@@ -298,8 +324,11 @@ byte-order mark — PowerShell's `Set-Content -Encoding utf8` adds one.
 - **One shared room, not private messaging.** Everyone with the key sees
   everything, and can push a build.
 - **No history.** Close the app and the conversation is gone.
-- **Nothing is signed.** The apps are built locally and are not notarised by
-  Apple or signed for Windows, because this is a tool for your own machines.
+- **Nothing is signed.** Neither notarised by Apple nor signed for Windows, so
+  a copy you did not build yourself will be met by Gatekeeper or SmartScreen
+  (see the install notes above for how to get past each). Certificates cost
+  money every year; building from source is free, takes one command, and lets
+  you see what you are running.
 - **Networks that block both multicast and broadcast** (some guest Wi-Fi, some
   "client isolation" access points) will leave the list empty even though
   everything else is correct.
