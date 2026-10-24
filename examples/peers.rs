@@ -58,14 +58,17 @@ fn main() {
     while Instant::now() < end {
         if let Ok(Event::Peers(list)) = rx.recv_timeout(Duration::from_millis(500)) {
             for p in list {
-                let line = format!(
-                    "{:<16} v{:<8} {:<30} {} [{:?}]",
-                    p.name, p.version, p.platform, p.addr, p.health
-                );
-                if !seen.contains(&line) {
-                    println!("  found  {}", line);
-                    seen.push(line);
+                // Keyed on the device, not the whole line - health changes as
+                // announcements come and go, and reprinting on every change
+                // reads as if the same machine were two devices.
+                if seen.contains(&p.id) {
+                    continue;
                 }
+                println!(
+                    "  found  {:<16} v{:<8} {:<30} {}",
+                    p.name, p.version, p.platform, p.addr
+                );
+                seen.push(p.id);
             }
         }
     }

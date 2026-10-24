@@ -242,6 +242,38 @@ follows the language and personal word list you already have, and nothing is
 bundled with the app. Lines containing anything code-shaped (a path, URL, key,
 hash or command) are skipped entirely, which is most of what gets pasted here.
 
+### Devices on another network
+
+NetPaste finds devices by calling out across the local network, which is why
+it needs no configuration — and also why a machine on the far side of a VPN is
+invisible even though it is perfectly reachable. Multicast and broadcast stop
+at the edge of the local network; unicast does not.
+
+Turn on **⚙ → Devices on other networks** and name the machine directly — a
+Tailscale name, a hostname, or an IP:
+
+```
+mac-mini-vmi3457213          # a tailnet name
+100.107.91.102               # or just the address
+192.168.9.14:45454           # add a port only if you changed the default
+```
+
+**Only one of the two devices needs the other's address.** A device that hears
+from a machine it has never seen before answers straight back to where the
+packet came from, which reaches networks its own multicast never will — so the
+far machine learns about you without being configured at all. Hostnames are
+looked up again every 30 seconds, so a name whose address moves is followed.
+
+It is off by default and behind a toggle on purpose: it sends this device's
+name and presence to an address beyond your LAN, and that should be a decision
+rather than a surprise. Switch it off and nothing leaves the local network
+again.
+
+> Each named device shows a dot in settings — green once it has answered,
+> amber while the address resolves but nothing has replied yet, red if the name
+> cannot be looked up at all. That is usually enough to tell a typo from a
+> firewall.
+
 ---
 
 ## Updates spread by themselves
@@ -319,8 +351,10 @@ byte-order mark — PowerShell's `Set-Content -Encoding utf8` adds one.
 
 ## Honest limitations
 
-- **Same network only.** No internet relay, by design. Different Wi-Fi, no
-  NetPaste.
+- **Same network, or a VPN you already run.** There is no internet relay by
+  design. Devices on the same LAN find each other automatically; devices
+  anywhere else need naming once (see *Devices on another network*), and that
+  only works if something like Tailscale already carries the traffic.
 - **One shared room, not private messaging.** Everyone with the key sees
   everything, and can push a build.
 - **No history.** Close the app and the conversation is gone.
