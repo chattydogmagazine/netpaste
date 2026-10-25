@@ -34,6 +34,10 @@ pub struct Config {
     /// Addresses or hostnames of those devices, as typed.
     #[serde(default)]
     pub remote_peers: Vec<String>,
+    /// Bounce the Dock icon, flash the taskbar and badge the icon with a
+    /// count when something arrives while the window is in the background.
+    #[serde(default = "default_true")]
+    pub notify: bool,
 }
 
 fn default_background() -> [u8; 3] {
@@ -70,6 +74,7 @@ impl Default for Config {
             background: default_background(),
             remote_peers_enabled: false,
             remote_peers: Vec::new(),
+            notify: default_true(),
         }
     }
 }

@@ -3,7 +3,9 @@
 //! NetPaste - one app on every machine. Paste or type into the box, hit Send,
 //! and it lands in the same box on every other device running the app.
 
-use netpaste_app::{config, crypto, net, proto, spell, theme, update};
+use netpaste_app::{config, crypto, net, notify, proto, spell, theme, update};
+
+const TITLE: &str = "NetPaste";
 
 use config::Config;
 use eframe::egui;
@@ -83,13 +85,21 @@ fn status_dot(ui: &mut egui::Ui, color: egui::Color32) {
 }
 
 fn main() -> eframe::Result<()> {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1000.0, 700.0])
-            .with_min_inner_size([640.0, 440.0])
-            .with_title("NetPaste"),
-        ..Default::default()
-    };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1000.0, 700.0])
+        .with_min_inner_size([640.0, 440.0])
+        .with_title(TITLE);
+
+    // Without this eframe substitutes its own egui logo at runtime, which on
+    // macOS becomes the Dock icon and quietly overrides the one in the app
+    // bundle - the bundle icon then only shows in Finder.
+    if let Ok(icon) =
+        eframe::icon_data::from_png_bytes(include_bytes!("../branding/icons/icon-256.png"))
+    {
+        viewport = viewport.with_icon(icon);
+    }
+
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native(
         "NetPaste",
         options,
@@ -154,6 +164,14 @@ struct App {
     last_update_check: std::time::Instant,
     /// What the skin was last applied for, so it is only re-applied on change.
     applied_theme: Option<(theme::Theme, [u8; 3], bool)>,
+    /// Set by a message landing, cleared once counted - the event arrives on
+    /// a network thread, the counting happens on the UI one.
+    arrived_unseen: bool,
+    /// Messages that arrived while the window was in the background.
+    unread: usize,
+    /// The last count we put on the icon and in the title, so neither is
+    /// rewritten on every frame.
+    shown_unread: usize,
 }
 
 /// Whether the operating system is currently in dark mode.
@@ -192,6 +210,9 @@ impl App {
             spell_src: String::new(),
             last_update_check: std::time::Instant::now(),
             applied_theme: None,
+            arrived_unseen: false,
+            unread: 0,
+            shown_unread: 0,
         };
         theme::apply(&cc.egui_ctx, app.cfg.theme, system_is_dark(&cc.egui_ctx), app.cfg.background);
         app.applied_theme = Some((app.cfg.theme, app.cfg.background, system_is_dark(&cc.egui_ctx)));
@@ -238,6 +259,37 @@ impl App {
                     e
                 ));
             }
+        }
+    }
+
+    /// Count what arrived while the window was in the background, and show
+    /// it on the icon and in the title. Reading it is what clears it, so the
+    /// count means "since you last looked", not "since you last clicked".
+    fn keep_unread_current(&mut self, ctx: &egui::Context) {
+        let focused = ctx.input(|i| i.focused);
+        let arrived = std::mem::take(&mut self.arrived_unseen);
+
+        if focused {
+            self.unread = 0;
+        } else if arrived && self.cfg.notify {
+            self.unread += 1;
+            // Bounces the Dock icon on macOS, flashes the taskbar button on
+            // Windows. Informational, not Critical: this is a clipboard, it
+            // should not demand the screen.
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::UserAttentionType::Informational,
+            ));
+        }
+
+        if self.unread != self.shown_unread {
+            self.shown_unread = self.unread;
+            notify::set_badge((self.unread > 0).then_some(self.unread));
+            let title = if self.unread > 0 {
+                format!("{} ({})", TITLE, self.unread)
+            } else {
+                TITLE.to_string()
+            };
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
         }
     }
 
@@ -323,6 +375,7 @@ impl App {
         if self.messages.iter().any(|m| m.id == inc.msg_id) {
             return;
         }
+        self.arrived_unseen = true;
         self.messages.push(Message {
             id: inc.msg_id,
             from_name: inc.from_name,
@@ -482,6 +535,7 @@ impl eframe::App for App {
         self.drain_events();
         self.poll_for_update();
         self.keep_theme_current(ctx);
+        self.keep_unread_current(ctx);
 
         self.top_bar(ctx);
         self.device_panel(ctx);
@@ -1146,6 +1200,29 @@ impl App {
                     .color(dim_c),
                 );
             }
+
+            ui.add_space(12.0);
+            ui.strong("Notifications");
+            if ui
+                .checkbox(
+                    &mut self.cfg.notify,
+                    "Let me know when something arrives while I am elsewhere",
+                )
+                .changed()
+            {
+                self.cfg.save();
+                if !self.cfg.notify {
+                    self.unread = 0;
+                }
+            }
+            let dim_c = dim(ui);
+            ui.label(
+                egui::RichText::new(
+                    "Bounces the icon in the Dock or flashes the taskbar button, and                      shows a count on the icon and in the window title until you look.",
+                )
+                .small()
+                .color(dim_c),
+            );
 
             ui.add_space(14.0);
             ui.strong("Devices on other networks");
