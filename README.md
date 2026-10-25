@@ -242,6 +242,18 @@ follows the language and personal word list you already have, and nothing is
 bundled with the app. Lines containing anything code-shaped (a path, URL, key,
 hash or command) are skipped entirely, which is most of what gets pasted here.
 
+### When something arrives while you are elsewhere
+
+NetPaste is meant to sit in the background, so it tells you when something
+lands: the Dock icon bounces on macOS, the taskbar button flashes on Windows,
+and a count appears on the icon and in the window title. Looking at the window
+clears it — the count means "since you last looked", not "since you last
+clicked something".
+
+It asks for attention *informationally*, not critically: the icon bounces once
+rather than until you deal with it. This is a clipboard, and it should not
+demand the screen. Turn it off entirely in **⚙ → Notifications**.
+
 ### Devices on another network
 
 NetPaste finds devices by calling out across the local network, which is why
